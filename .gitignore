@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# RStudio
+.Rhistory
+.RData
+.Rproj.user/
+
+# Python environments
+.venv/
+venv/
+
+# Sensitive credentials
+.env
+.Renviron

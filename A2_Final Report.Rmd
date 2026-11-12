@@ -1,0 +1,1984 @@
+---
+title: 'The Social Pulse: Investigating a Viral Moment'
+author: "Tran Ngoc Hieu Van - 22205175"
+date: "2026-11-09"
+output:
+  pdf_document: default
+  html_document: default
+subtitle: "COMP3020 Social Web Analytics - Group Project"
+---
+
+```{=html}
+<style>
+h1 { font-size: 20pt; }
+h2 { font-size: 18pt; }
+h3 { font-size: 16pt; }
+h4 { font-size: 14pt; }
+body { font-size: 12pt; }
+</style>
+```
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  fig.width = 8,
+  fig.height = 5
+)
+```
+
+**Load all required packages here**
+
+```{r}
+library(atrrr)
+library(cluster)
+library(dplyr)
+library(ggplot2)
+library(igraph)
+library(stopwords)
+library(stringr)
+library(tidytext)
+library(tidyverse)
+```
+
+# 1 Introduction
+
+## 1.1 Topic and Event Description
+
+- Main topic: CONTROL Resonant
+- Specific event: Release Day of CONTROL Resonant
+- Event date: 24 September 2026
+- Selected subtopic: Gameplay and Combat
+- Data source: Bluesky
+- Data collection period: Before event (17/09/2026 - 23/09/2026) and After event (25/09/2026 - 01/10/2026)
+
+## 1.2 Research Objectives
+
+- Objective 1: Investigate changes in discussion volume and subtopic proportions.
+- Objective 2: Identify discussion themes through text mining.
+- Objective 3: Discover comment clusters and their relationships with discussion threads.
+- Objective 4: Investigate the interaction network of active users.
+
+# 2. Question 1: Trend & Time Series Analysis
+
+## Collect and clean dataset
+
+```{r}
+# 1. Set the event date and collection periods
+event_date <- as.Date("2026-09-24")
+
+# Take the same equal period of 7 days for before and after the event
+before_start <- event_date - 7
+before_end <- event_date - 1
+
+after_start <- event_date + 1
+after_end <- event_date + 7
+
+# Display the selected dates
+cat("Before period:", as.character(before_start), 
+    "to", as.character(before_end), "\n")
+
+cat("Event day:", as.character(event_date), "\n")
+
+cat("After period:", as.character(after_start),
+    "to", as.character(after_end), "\n")
+
+# 2. Create a folder to save data
+dir.create("data", showWarnings = FALSE)
+
+# 3. Collect data
+# Collect posts BEFORE the event day
+before_raw <- search_post(
+  q = "CONTROL Resonant",
+  since = as.character(before_start),
+  until = as.character(before_end + 1),
+  limit = 5000
+)
+
+before_raw$period <- "Before"
+cat("Before:", nrow(before_raw), "posts\n")
+
+# Collect posts ON the event day
+event_raw <- search_post(
+  q = "CONTROL Resonant",
+  since = as.character(event_date),
+  until = as.character(event_date + 1),
+  limit = 5000
+)
+
+event_raw$period <- "Event day"
+cat("Event day:", nrow(event_raw), "posts\n")
+
+# Collect posts AFTER the event
+after_raw <- search_post(
+  q = "CONTROL Resonant",
+  since = as.character(after_start),
+  until = as.character(after_end + 1),
+  limit = 5000
+)
+
+after_raw$period <- "After"
+cat("After:", nrow(after_raw), "posts\n")
+
+# 4. Clean data by date period
+# Filter posts to the intended date ranges
+before_clean <- before_raw %>%
+  mutate(post_date = as.Date(created_at)) %>%
+  filter(
+    !is.na(post_date),
+    post_date >= before_start,
+    post_date <= before_end)
+
+event_clean <- event_raw %>%
+  mutate(post_date = as.Date(created_at)) %>%
+  filter(
+    !is.na(post_date),
+    post_date == event_date)
+
+after_clean <- after_raw %>%
+  mutate(post_date = as.Date(created_at)) %>%
+  filter(
+    !is.na(post_date),
+    post_date >= after_start,
+    post_date <= after_end)
+
+# Remove duplicate posts using their URI
+before_clean <- before_clean %>%
+  distinct(uri, .keep_all = TRUE)
+
+event_clean <- event_clean %>%
+  distinct(uri, .keep_all = TRUE)
+
+after_clean <- after_clean %>%
+  distinct(uri, .keep_all = TRUE)
+
+# Assign period labels
+before_clean <- before_clean %>%
+  mutate(period = "Before")
+
+event_clean <- event_clean %>%
+  mutate(period = "Event")
+
+after_clean <- after_clean %>%
+  mutate(period = "After")
+
+# Count posts without readable text
+count_no_text <- function(data) {
+  sum(is.na(data$text) | trimws(data$text) == "")
+}
+
+before_no_text <- count_no_text(before_clean)
+event_no_text <- count_no_text(event_clean)
+after_no_text <- count_no_text(after_clean)
+
+cat("Before posts without text:", count_no_text(before_clean), "\n")
+cat("Event posts without text:", count_no_text(event_clean), "\n")
+cat("After posts without text:", count_no_text(after_clean), "\n")
+
+# Select the columns needed for analysis
+before_export <- before_clean %>%
+  select(
+    uri, cid, author_handle, author_name, text,
+    reply_count, repost_count, like_count,
+    created_at, post_date, period,
+    in_reply_to, in_reply_root
+  )
+
+event_export <- event_clean %>%
+  select(
+    uri, cid, author_handle, author_name, text,
+    reply_count, repost_count, like_count,
+    created_at, post_date, period,
+    in_reply_to, in_reply_root
+  )
+
+after_export <- after_clean %>%
+  select(
+    uri, cid, author_handle, author_name, text,
+    reply_count, repost_count, like_count,
+    created_at, post_date, period,
+    in_reply_to, in_reply_root
+  )
+
+analysis_export <- bind_rows(before_export, after_export)
+```
+
+## Export the cleaned dataset for further analysis
+
+```{r}
+write.csv(before_export, "data/before_clean.csv", row.names = FALSE)
+write.csv(event_export, "data/event_clean.csv", row.names = FALSE)
+write.csv(after_export, "data/after_event.csv", row.names = FALSE)
+write.csv(analysis_export, "data/analysis_before_after.csv", row.names = FALSE)
+```
+
+## Question 1A: Classify the subtopic
+
+### 1. Load the analysis dataset and classify data without text
+
+```{r}
+# Prepare data for subtopic classification
+classification_data <- analysis_export %>%
+  filter(!is.na(text), trimws(text) != "")
+
+# Check the number of posts available for classification by period
+cat("Original posts:", nrow(analysis_export), "\n")
+cat("Readale posts:", nrow(classification_data), "\n")
+cat("Excluded posts:", 
+    nrow(analysis_export) - nrow(classification_data), "\n")
+
+# Check the number of posts for each period
+classification_data %>%
+  count(period)
+```
+
+### 2. Define subtopic and inclusion/exclusion rules
+
+- The selected subtopic is Gameplay and Combat in CONTROL Resonant.
+- For subtopic classification, this part focuses on examining posts that discuss the game's gameplay and combat systems, weapons, abilities, boss encounters, movement, controls, and overall gameplay experience.
+
+**Inclusion and Exclusion Rules**
+
+- Before subtopic classification, all non-readable posts is excluded in classification_data. Therefore, in this part, posts is classified into Subtopic and No-Subtopic. The classification rules is followed below:
+
+- Subtopic is explicitly discusses at least one aspect of Gameplay and Combat.
+
+- No-Subtopic does not explicitly discuss Gameplay and Combat.
+
+**Subtopic Content Included:**
+
+- Combat systems and mechanics
+
+- Weapons and fighting styles
+
+- Abilities, skills and combos
+
+- Boss encounters and difficulty
+
+- Movement and player controls
+
+- Exploration and gameplay experience, when explicitly discussed as gameplay
+
+**Brief methodology:** To identify and classify posts related to the Gameplay and Combat subtopic, a multi-step process was conducted.
+
+- First, a reference sample of 200 posts (100 Before and 100 After) was prepared. Based on the gameplay_keywords, the reference sample was firstly labelled TRUE or FALSE on the has_keyword variable and then was manually labelled and assign Subtopic or No-Subtopic on the manual_label variable. This reference sample was established to provide example of Subtopic and No-Subtopic posts for further steps.
+
+- Secondly, TF-IDF was then used to transform the text into numerical vectors, while Cosine Similarity measured the similarity between posts to support the classification process.
+
+- Posts that could not be confidently classified were subsequently reviewed manually before combining the results into the final labelled dataset.
+
+### 3. Identify potential Gameplay and Combat posts
+
+```{r}
+# Define Gameplay and Combat keywords
+gameplay_keywords <- paste(
+  "gameplay",
+  "combat",
+  "fight",
+  "fighting",
+  "weapon",
+  "abiity",
+  "abilities",
+  "skill",
+  "skills",
+  "combo",
+  "boss",
+  "attack",
+  "movement",
+  "mechanic",
+  "mechanics",
+  "exploration",
+  "parry",
+  "dodge",
+  "melee",
+  "traversal",
+  "controls",
+  sep = "|"
+)
+```
+
+```{r, eval = FALSE}
+# Randomly sample 200 posts: 100 Before + 100 After
+set.seed(2026)
+
+reference_sample <- classification_data %>%
+  group_by(period) %>%
+  slice_sample(n = 100) %>%
+  ungroup() %>%
+  mutate(
+    has_keyword = str_detect(
+      text,
+      regex(gameplay_keywords, ignore_case = TRUE)
+    ),
+    sample_id = row_number(),
+    manual_label = NA_character_
+  ) %>%
+  select(sample_id, period, has_keyword, manual_label, text)
+
+# Check sample distribution
+reference_sample %>%
+  count(period, has_keyword)
+
+# Open the 200 posts for manual review
+View(reference_sample)
+
+# Save the reference sample
+write.csv(
+  reference_sample,
+  "data/reference_sample_200.csv",
+  row.names = FALSE
+)
+```
+
+```{r}
+# Import the manually labelled reference sample to preserve the human annotations and ensure consistent classification results when knitting the report
+reference_sample <- read.csv(
+  "data/reference_sample_200.csv",
+  stringsAsFactors = FALSE,
+  fileEncoding = "UTF-8"
+)
+
+# Check manual labels 
+table(reference_sample$manual_label, useNA = "ifany")
+
+stopifnot(!any(is.na(reference_sample$manual_label)))
+```
+
+### 4. Create a matching key and prepare reference and unlabelled data
+
+```{r}
+# Create a matching key using period and key
+reference_sample <- reference_sample %>%
+  mutate(match_key = paste(period, text, sep = "|||"))
+
+classification_data <- classification_data %>%
+  mutate(match_key = paste(period, text, sep = "|||"))
+
+# Create a normalized text-to-URI mapping
+reference_uri_map <- classification_data %>%
+  mutate(text_norm = str_squish(text)) %>%
+  group_by(period, text_norm) %>%
+  summarize(
+    uri = first(uri), 
+    .groups = "drop"
+  )
+
+# Keep exactly 200 manually labelled reference posts
+reference_data <- reference_sample %>%
+  mutate(
+    text_norm = str_squish(text),
+    doc_id = paste0("ref_", sample_id)
+  ) %>%
+  left_join(
+    reference_uri_map,
+    by = c("period", "text_norm")
+  )
+
+# Identify reference URIs
+reference_uris <- reference_data %>%
+  filter(!is.na(uri)) %>%
+  distinct(uri)
+
+# Remove reference posts from unlabelled dataset
+unlabelled_data <- classification_data %>%
+  anti_join(
+    reference_uris, by = "uri") %>%
+    mutate(doc_id = paste0("post_", row_number()))
+
+# Check dataset sizes
+cat("Reference posts", nrow(reference_data), "\n")
+cat("Unique reference URIs:", nrow(reference_uris), "\n")
+cat("Posts to classify:", nrow(unlabelled_data), "\n")
+cat("Total combined posts:",
+    nrow(reference_data) + nrow(unlabelled_data), "\n")
+```
+
+### 5. Calculate TF-IDF
+
+```{r}
+# Combine reference and unlabelled data
+combined_data <- bind_rows(
+  reference_data %>%
+    select(doc_id, period, text, manual_label),
+  unlabelled_data %>%
+    mutate(manual_label = NA_character_) %>%
+    select(doc_id, period, text, manual_label)
+)
+
+# Tokenization - split text into individual words
+tokens_data <- combined_data %>%
+  unnest_tokens(word, text)
+
+# Remove common words (stop words)
+tokens_data <- tokens_data %>%
+  anti_join(stop_words, by = "word")
+
+# Calculate TF-IDF
+tfidf_data <- tokens_data %>%
+  count(doc_id, word, name = "n") %>%
+  bind_tf_idf(
+    term = word,
+    document = doc_id,
+    n = n
+  )
+
+# Check the results
+head(tfidf_data)
+
+cat("Total documents:", n_distinct(tfidf_data$doc_id), "\n")
+cat("Total unique words:", n_distinct(tfidf_data$word), "\n")
+
+# Convert TF-IDF data into a document-term matrix
+tfidf_matrix <- tfidf_data %>%
+  select(doc_id, word, tf_idf) %>%
+  pivot_wider(
+    names_from = word,
+    values_from = tf_idf,
+    values_fill = 0
+  )
+
+# Convert to matrix
+tfidf_matrix_numeric <- as.matrix(
+  tfidf_matrix %>%
+    select(-doc_id)
+)
+
+# Set document IDs as row names
+rownames(tfidf_matrix_numeric) <- tfidf_matrix$doc_id
+
+# Check dimensions
+dim(tfidf_matrix_numeric)
+```
+
+### 6. Calculate Cosine Similarity
+
+```{r}
+# Separate reference and unlabelled documents
+reference_ids <- reference_data$doc_id
+unlabelled_ids <- unlabelled_data$doc_id
+
+# Keep only documents that exist in the TF-IDF matrix
+reference_ids <- intersect(reference_ids, rownames(tfidf_matrix_numeric))
+unlabelled_ids <- intersect(unlabelled_ids, rownames(tfidf_matrix_numeric))
+
+reference_matrix <- tfidf_matrix_numeric[
+  reference_ids, , drop = FALSE
+]
+unlabelled_matrix <- tfidf_matrix_numeric[
+  unlabelled_ids, , drop = FALSE
+]
+
+# Calculate cosine similarity using matrix multiplication
+
+# Calculate dot product
+similarity_matrix <- unlabelled_matrix %*% t(reference_matrix)
+
+# Calculate vector magnitudes
+row_norms <- sqrt(rowSums(unlabelled_matrix^2))
+col_norms <- sqrt(rowSums(reference_matrix^2))
+
+# Calculate cosine similarity
+denominator <- outer(row_norms, col_norms)
+
+similarity_matrix <- similarity_matrix / denominator
+
+# Handle invalid values and assign matrix labels
+similarity_matrix[!is.finite(similarity_matrix)] <- 0
+
+rownames(similarity_matrix) <- rownames(unlabelled_matrix)
+colnames(similarity_matrix) <- rownames(reference_matrix)
+
+# Check similarity matrix
+dim(similarity_matrix)
+```
+
+### 7. Calculate average of top 3 similarities by class
+
+```{r}
+# Identify reference labels
+reference_labels <- reference_data$manual_label[
+  match(colnames(similarity_matrix), reference_data$doc_id)
+]
+
+# Identify reference groups
+subtopic_index <- which(reference_labels == "Subtopic")
+no_subtopic_index <- which(reference_labels == "No-Subtopic")
+
+# Calculate mean of the top 3 similarity scores
+top3_mean <- function(x) {
+  mean(sort(x, decreasing = TRUE)[1:3])
+}
+
+subtopic_similarity <- apply(
+  similarity_matrix[, subtopic_index, drop = FALSE],
+  1,
+  top3_mean
+)
+
+no_subtopic_similarity <- apply(
+  similarity_matrix[, no_subtopic_index, drop = FALSE],
+  1,
+  top3_mean
+)
+```
+
+### 8. Create classification suggestions
+
+#### 8.1 Generate automatic classification suggestions
+
+```{r}
+classification_suggestions <- unlabelled_data %>%
+  filter(doc_id %in% rownames(similarity_matrix)) %>%
+  mutate(
+    subtopic_similarity = subtopic_similarity[doc_id],
+    no_subtopic_similarity = no_subtopic_similarity[doc_id],
+    similarity_gap = abs(
+      subtopic_similarity - no_subtopic_similarity
+    ),
+    suggested_label = case_when(
+      subtopic_similarity > no_subtopic_similarity ~ "Subtopic",
+      no_subtopic_similarity > subtopic_similarity ~ "No-Subtopic",
+      TRUE ~ "Needs manual review"
+    )
+  )
+
+summary(classification_suggestions$subtopic_similarity)
+summary(classification_suggestions$no_subtopic_similarity)
+head(classification_suggestions %>%
+       select(doc_id, subtopic_similarity,
+              no_subtopic_similarity), 10)
+table(classification_suggestions$suggested_label)
+```
+
+#### 8.2 Export posts for manual review
+
+```{r, eval=FALSE}
+manual_review <- classification_suggestions %>%
+  filter(
+    subtopic_similarity == 0 &
+    no_subtopic_similarity == 0
+  ) %>%
+  mutate(
+    suggested_label = "Needs manual review",
+    manual_label = NA_character_
+  ) %>%
+  select(
+    doc_id,
+    period,
+    text,
+    subtopic_similarity,
+    no_subtopic_similarity,
+    similarity_gap,
+    manual_label
+  )
+```
+
+#### 8.3 Export CSV file for manual labels
+
+```{r, eval =FALSE}
+write.csv(
+  manual_review,
+  "manual_review_posts.csv",
+  row.names = FALSE,
+  fileEncoding = "UTF-8"
+)
+```
+
+#### 8.4 Import manually reviewed posts
+
+```{r}
+manual_review_completed <- read.csv(
+  "manual_review_posts.csv",
+  stringsAsFactors = FALSE,
+  fileEncoding = "UTF-8",
+  colClasses = c(doc_id = "character")
+)
+
+# Check manual labels
+table(manual_review_completed$manual_label, useNA = "ifany")
+
+stopifnot(!any(is.na(manual_review_completed$manual_label)))
+
+# Match manually reviewed posts using period and normalized text
+manual_review_key <- manual_review_completed %>%
+  mutate(text_key = str_squish(text))
+
+needs_review_key <- classification_suggestions %>%
+  filter(suggested_label == "Needs manual review") %>%
+  mutate(text_key = str_squish(text))
+
+matched_posts <- inner_join(
+  manual_review_key,
+  needs_review_key %>%
+    select(period, text_key, matched_doc_id = doc_id),
+  by = c("period", "text_key")
+)
+
+# Check matching results
+nrow(matched_posts)
+
+stopifnot(nrow(matched_posts) == 73)
+```
+
+#### 8.5 Merge manual labels with automatic classification
+
+```{r}
+unlabelled_classification_final <- classification_suggestions %>%
+  left_join(
+    matched_posts %>%
+      select(
+        matched_doc_id,
+        manual_label
+      ),
+    by = c("doc_id" = "matched_doc_id")
+  ) %>%
+  mutate(
+    final_label = case_when(
+      suggested_label == "Needs manual review" ~ manual_label,
+      TRUE ~ suggested_label
+    )
+  )
+
+table(unlabelled_classification_final$final_label, useNA = "ifany")
+
+sum(is.na(unlabelled_classification_final$final_label))
+
+nrow(unlabelled_classification_final)
+```
+
+#### 8.6 Identify posts excluded from TF-IDF classification and create dataset
+
+```{r}
+posts_without_tfidf <- unlabelled_data %>%
+  anti_join(
+    unlabelled_classification_final %>% select(doc_id),
+    by = "doc_id"
+  ) %>%
+  select(doc_id, uri, period, text) %>%
+  mutate(final_label = "No-Subtopic")
+
+# Check number of excluded posts
+nrow(posts_without_tfidf)
+
+posts_without_tfidf_final <- posts_without_tfidf
+
+# Check labels
+table(posts_without_tfidf_final$final_label, useNA = "ifany")
+```
+
+#### 8.7 Merge reference dataset and dataset of posts without TF-IDF into the final classification dataset
+
+```{r}
+# Reference posts
+reference_final <- reference_data %>%
+  mutate(
+    final_label = manual_label
+  )
+```
+
+#### 8.8 Combine all classified posts
+
+```{r}
+classification_final <- bind_rows(
+  reference_final %>%
+    select(doc_id, period, text, final_label),
+  unlabelled_classification_final %>%
+    select(doc_id, period, text, final_label),
+  posts_without_tfidf_final %>%
+    select(doc_id, period, text, final_label)
+)
+```
+
+### 9. Classification distribution
+
+```{r}
+# 9.1 Overall classification distribution
+overall_proportion <- classification_final %>%
+  count(final_label, name = "number_of_posts") %>%
+  mutate(
+    proportion = number_of_posts / sum(number_of_posts),
+    percentage = proportion * 100
+  )
+
+print(overall_proportion)
+
+# 9.2 Classification distribution by period
+period_proportion <- classification_final %>%
+  count(period, final_label, name = "number_of_posts") %>%
+  mutate(
+    proportion = number_of_posts / sum(number_of_posts),
+    percentage = proportion * 100
+  ) %>%
+  ungroup()
+
+print(period_proportion)
+```
+
+### 10. Check the final result
+
+```{r}
+# Total number of posts
+nrow(classification_final)
+
+# Count final labels
+table(classification_final$final_label)
+
+# Check missing labels
+sum(is.na(classification_final$final_label))
+
+# Check duplicate document IDs
+sum(duplicated(classification_final$doc_id))
+
+# Check posts by period and label
+table(
+  classification_final$period,
+  classification_final$final_label
+)
+
+# Export the final dataset
+write.csv(
+  classification_final,
+  "classification_final.csv",
+  row.names = FALSE,
+  fileEncoding = "UTF-8"
+)
+```
+
+## Question 1B: Chi-Square Test of Independence
+
+**State the hypothesis**
+
+- H0 (Null Hypothesis): The proportion of subtopic posts is independent with the time period.
+
+- H1 (Alternative Hypothesis): The proportion of subtopic is associated with the time period.
+
+### 1. Create a contingency table
+
+```{r}
+classification_table <- table(
+  Period = classification_final$period,
+  Subtopic_Status = classification_final$final_label
+)
+
+classification_table
+```
+
+### 2. Chi-square test
+
+```{r}
+# Perform Chi-square test of independence
+chi_result <- chisq.test(
+  classification_table,
+  correct = FALSE
+)
+
+# View the Chi-square result
+print(chi_result)
+
+print(chi_result$expected)
+```
+
+**Conclusion:** Since the p_value (0.0.1498) < alpha (0.05), the null hypothesis (H0) is rejected. Additionally, all expected cell counts exceeded 5, satisfying the commonly use expected-frequency guideline for the test. Therefore, the proportion of subtopic posts is associated with the time period. Consequently, these results provide evidence of an association between the time period and subtopic classification. However, the association does not establish that the release itself caused the increase.
+
+## Question 1C: Comparison of Chi-square score
+
+**Purpose of the analysis**
+
+- While Question 1B compares the proportion of Gameplay and Combat posts between the Before and After periods, the Question 1C examines how this proportion varies across 14 individual days, providing a more detailed view of daily discussion patterns.
+
+**Baseline and denominator**
+
+- The baseline is the overall proportion of Gameplay and Combat posts among all CONTROL Resonant posts collected across 14 days. For each day, the denominator is the total number of CONTROL Resonant posts on that day, consisting of both Gameplay and Combat posts and posts outside this subtopic.
+
+- The expected frequencies are calculated based on the row totals (daily post counts) and column totals (overall Subtopic and Other counts) of the contingency table. This assumes that the proportion of Gameplay and Combat posts is independent of the day.
+
+**State the hypothesis**
+
+- H0 (Null Hypothesis): The proportion of Gameplay and Combat posts is independent of the event day.
+
+- H1 (Alternative Hypothesis): The proportion of Gameplay and Combat posts is associated with the event day.
+
+### 1. Prepare dataset
+
+```{r}
+# 1.1 Add post dates to the final classification dataset
+post_dates <- classification_data %>%
+  select(uri, post_date) %>%
+  distinct(uri, .keep_all = TRUE)
+
+# 1.2 Combine all document IDs and URIs
+q1c_data <- bind_rows(
+  reference_data %>% select(doc_id, uri),
+  unlabelled_classification_final %>% select(doc_id, uri),
+  posts_without_tfidf_final %>% select(doc_id, uri)
+) %>%
+  left_join(post_dates, by = "uri") %>%
+  left_join(
+    classification_final %>% select(doc_id, final_label),
+    by = "doc_id"
+  )
+
+# 1.3 Check the result
+nrow(q1c_data)
+table(q1c_data$final_label, useNA = "ifany")
+table(q1c_data$post_date)
+sum(is.na(q1c_data$post_date))
+
+# Check the posts without post dates
+q1c_data %>%
+  filter(is.na(post_date)) %>%
+  select(doc_id, final_label, post_date)
+
+# Check the result again
+sum(is.na(q1c_data$post_date))
+nrow(q1c_data)
+table(q1c_data$post_date)
+table(q1c_data$final_label, useNA = "ifany")
+```
+
+### 2. Create a contingency table
+
+```{r}
+q1c_table <- table(
+  q1c_data$post_date,
+  q1c_data$final_label
+)
+
+q1c_table
+```
+
+### 3. Calculate daily subtopic proportions
+
+```{r}
+daily_proportion <- prop.table(q1c_table, margin = 1)
+round(daily_proportion * 100, 2)
+```
+
+### 4. Chi-square test
+
+```{r}
+# Perform Chi-square test of independence
+q1c_chisq <- chisq.test(q1c_table, correct = FALSE)
+
+# View the test results
+q1c_chisq
+
+# Check expected frequencies
+q1c_chisq$expected
+
+# Find the minimum expected frequency
+min(q1c_chisq$expected)
+
+# Count cells with expected frequency below 5
+sum(q1c_chisq$expected < 5)
+```
+
+**Conclusion** The test returned a Chi-square statistic of 24.128, with 13 degrees of freedom and a p-value of 0.02997. Since the p-value (0.02997) < alpha (0.05), the null hypothesis is rejected. This indicates a statistically significant association between the day and the proportion of subtopic posts. Therefore, the proportion of Gameplay and Combat discussions was not consistent across the 14 days.
+
+**Explain why the two Chi-square scores different**
+
+- The Chi-square scores obtained in Question 1B and Question 1C are different because the two tests examine the data at different levels of temporal details.
+
+- In Question 1B, posts are grouped into two periods (Before and After), producing a 2x2 contingency table. The test examines whether the proportion of Gameplay and Combat posts differs between two periods. The result is X-squared = 5.9187, df = 1, p-value = 0.01498.
+
+- In Question 1C, posts are grouped into 14 individual days, producing a 14x2 contingency table. This test examines whether the proportion of Subtopic posts varies across individual days. The result is X-squared = 24.128, df = 13, p-value = 0.02997.
+
+- The scores differ because the tests use different time groupings, contingency table dimensions, expected frequencies and degrees of freedom. Question 1B focuses on the overall difference between the two period Before and After, whereas Question 1C captures daily variations that may hidden when posts are aggregated into two periods.
+
+## Question 1D: Simple Linear Regression
+
+### 1. Calculate daily post counts
+
+```{r}
+daily_counts <- analysis_export %>%
+  group_by(post_date) %>%
+  summarize(
+    Total_Posts = n()
+  ) %>%
+  arrange(post_date)
+
+# Convert post date to Date format and create time variable
+daily_counts <- daily_counts %>%
+  mutate(
+    post_date = as.Date(post_date),
+    time = as.numeric(post_date - min(post_date))
+  )
+
+# Display daily post counts
+print(daily_counts, n = Inf)
+```
+
+### 2. Fit a simple linear regression model
+
+```{r}
+regression_model <- lm(Total_Posts ~ time, data = daily_counts)
+
+# Display regression results
+summary(regression_model)
+
+# Extract key statistics
+slope <- coef(regression_model)[["time"]]
+print(slope)
+
+r_squared <- summary(regression_model)$r.squared
+print(r_squared)
+```
+
+### 3. Visualize daily post counts and regression line using a scatter plot
+
+```{r}
+regression_plot <- ggplot(daily_counts, aes(x = time, y = Total_Posts)) +
+  geom_point(size = 3) + 
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    title = "Daily CONTROL Resonant Posts Over Time",
+    x = "Days Since 17 September 2026",
+    y = "Number of Posts"
+  ) +
+  theme_minimal()
+
+# Display the plot
+print(regression_plot)
+
+# Save the plot
+ggsave(
+  "q1d_daily_post_regression.png",
+  plot = regression_plot,
+  width = 8,
+  height = 5,
+  dpi = 300
+)
+```
+
+**Interpretation the slope and R-squared:**
+
+- The slope is 28.60 indicates that the predicted number of posts increased by approximately 28.60 posts per day.
+
+- The R-squared value of 0.3478 indicates that time explains approximately 34.78% of the variation in daily posts counts, while the remaining 65.22% is unexplained by the linear model. Although the positive slope is statistically significant (p = 0.02643), the scatter plot shows considerable day-to-day fluctuations, with some sharp increases and decreases.
+
+- Therefore, the model suggests a positive linear trend overall, but the relationship is not strongly linear, and time alone does not adequately explain the chnages in daily post activity.
+
+## Question 1E: Limitations of the Linear Trend
+
+Linear regression has several limitations when analyzing viral spikes in Social Web data.
+
+1.  It assumes a linear regression between time and post counts, which may not accurately represent sudden increases or decreases in online activity.
+
+2.  Viral spikes can cause extreme fluctuations in daily post counts. Meanwhile, a straight regression line cannot capture these sudden increases and subsequent declines.
+
+3.  The model only considers time as an explanatory variable and does not account for other factors that may influence posting activity, such as trending discussions, user engagement, or external events.
+
+Therefore, although linear regression can illustrate the overall trend, it may not be suitable for accurately predicting sudden viral spikes or short-term fluctuations in Social Web activity.
+
+# Question 2: Text Mining & Topic Discovery
+
+## Question 2A: Identify the Top Three Discussion Threads
+
+```{r}
+# Check original posts and replies
+table(is.na(analysis_export$in_reply_to))
+```
+
+### 1. Identify the top 3 original posts by reply count
+
+```{r}
+top3_posts <- analysis_export %>%
+  filter(is.na(in_reply_to)) %>%
+  arrange(desc(reply_count)) %>%
+  slice_head(n = 3) %>%
+  select(
+    author_handle,
+    text,
+    uri,
+    reply_count,
+    like_count,
+    repost_count
+  )
+```
+
+### 2. Retrieve and check the 3 discussion threads
+
+```{r}
+# Convert AT URIs into Bluesky URL
+top3_urls <- convert_at_to_http(top3_posts$uri)
+
+# Retrieve each discussion thread
+discussion_threads <- lapply(top3_urls, get_replies)
+
+# Assign thread names
+names(discussion_threads) <- paste0("thread", 1:3)
+
+# Check the dimensions of all 3 threads
+lapply(discussion_threads, dim)
+```
+
+### 3. Summarize the retrieved replies (data validation)
+
+```{r}
+thread_summary <- bind_rows(
+  lapply(seq_along(discussion_threads), function(i) {
+    thread <- discussion_threads[[i]]
+    root_uri <- top3_posts$uri[i]
+    data.frame(
+      thread = paste0("Thread ", i),
+      original_posts = sum(is.na(thread$in_reply_to)),
+      # Direct replies: Posts that respond directly to the original post of a discussion thread
+      direct_replies = sum(
+        thread$in_reply_to == root_uri,
+        na.rm = TRUE
+      ),
+      # Nested replies: Posts that respond to other replies within the thread
+      nested_replies = sum(
+        !is.na(thread$in_reply_to) &
+          thread$in_reply_to != root_uri
+      ),
+      # Total replies: The sum of direct and nested replies.
+      total_replies = sum(!is.na(thread$in_reply_to)),
+      reported_reply_count = top3_posts$reply_count[i]
+    )
+  })
+)
+
+thread_summary
+```
+
+### 4. Create the result table and export final result
+
+```{r}
+# Create the final Q2a results table
+q2a_table <- top3_posts %>%
+  mutate(
+    Rank = row_number(),
+    post_url = convert_at_to_http(uri)
+  ) %>%
+  select(
+    Rank,
+    author_handle,
+    text,
+    post_url,
+    reply_count,
+    like_count,
+    repost_count
+  ) %>%
+  rename(
+    Author = author_handle,
+    'Post Text' = text,
+    'Post URL' = post_url,
+    'Reply Count' = reply_count,
+    Likes = like_count,
+    Reposts = repost_count
+  )
+
+q2a_final_table <- q2a_table %>%
+  mutate(thread = paste0("Thread ", Rank)) %>%
+  left_join(
+    thread_summary,
+    by = c("thread" = "thread")
+  ) %>%
+  select(
+    Rank,
+    Author,
+    'Post Text',
+    'Post URL',
+    'Reply Count',
+    total_replies,
+    direct_replies,
+    nested_replies,
+    Likes,
+    Reposts
+  ) %>%
+  rename(
+    'Reposted Replies' = 'Reply Count',
+    'Retrieved Replies' = total_replies,
+    'Direct Replies' = direct_replies,
+    'Nested Replies' = nested_replies
+  )
+
+# Export the final results table
+write.csv(
+  q2a_final_table,
+  "q2a_final_table.csv",
+  row.names = FALSE
+)
+```
+
+## Question 2B: Word Frequency Distribution
+
+### 1. Extract replies from the three discussion threads
+
+```{r}
+thread_replies <- lapply(discussion_threads, function(thread) {
+  thread %>%
+    filter(!is.na(in_reply_to)) %>%
+    select(text)
+})
+
+# Check the number of replies in each thread
+lapply(thread_replies, nrow)
+```
+
+### 2. Text Pre-processing
+
+```{r}
+# Tokenize replies from each discussion thread
+thread_words <- lapply(seq_along(thread_replies), function(i) {
+  thread_replies[[i]] %>%
+    unnest_tokens(word, text) %>% # Split the content in the text column into individual words
+    mutate(thread = paste0("Thread", i)) # Add a label to indicate which thread the term belongs to
+})
+
+# Remove stop words from each thread
+thread_words_clean <- lapply(thread_words, function(thread) {
+  thread %>%
+    anti_join(stop_words, by = "word") %>%
+    filter(str_detect(word, "[a-z]")) # Retain words that contain at least 1 letter, remove tokens consisting solely of numbers/special characters
+})
+```
+
+### 3. Calculate word frequency
+
+```{r}
+thread_frequency <- lapply(thread_words_clean, function(thread) {
+  thread %>%
+    count(word, sort = TRUE)
+})
+```
+
+### 4. Extract the top 15 most frequent words from each thread
+
+```{r}
+top15_frequency <- lapply(seq_along(thread_frequency), function(i) {
+  thread_frequency[[i]] %>%
+    slice_head(n = 15) %>%
+    mutate(Thread = paste0("Thread", i)) %>%
+    select(Thread, Word = word, Frequency = n)
+})
+
+# Combine all three tables
+top15_frequency_table <- bind_rows(top15_frequency)
+
+# Export CSV
+write.csv(
+  top15_frequency_table,
+  "q2b_top15_frequency.csv",
+  row.names = FALSE
+)
+
+# Display Top 15 frequent words for all 3 threads
+top15_frequency_table %>%
+  arrange(Thread, desc(Frequency)) %>%
+  print(n = 45)
+```
+
+## Question 2C: Comment on frequency tables
+
+### Display the dataset for comment
+
+```{r}
+# Display the original posts of the thread discussion threads
+top3_posts %>%
+  mutate(Thread = paste0("Thread ", row_number())) %>%
+  select(Thread, author_handle, text, reply_count)
+```
+
+**Discussion Themes and Comparison Across the Three Threads**
+
+Across the three discussion threads, a common theme is the community's interest in CONTROL Resonant and the Remedy gaming universe. Discussions cover various aspects of the game, including its trailer, music, gameplay-related elements and players' purchase intentions.
+
+However, each thread develops a distinct dicussion direction:
+
+- Thread 1 focuses on humor and literary references, particularly Don Quixote, making it the most distinctive discussion among the three threads.
+
+- Thread 2 centers on the launch trailer, promotional content and community reactions.
+
+- Thread 3 focuses more on players' engagement with the game, including gameplay-related discussions and support for Remedy category.
+
+Threads 2 and 3 share more similar keywords, particularly "game", "control" and "love", suggesting greater overlap in their game-related discussions. In contrast, Thread 1 features distinctive literary references.
+
+Overall, although all three threads resolve around CONTROL Resonant, their discussions develop into different conversational themes.
+
+# Question 3: Clustering & Visualization
+
+## Question 3A: Data Preparation and TF-IDF
+
+### 1. Combine all discussion threads
+
+```{r}
+all_comments <- bind_rows(
+  lapply(seq_along(discussion_threads), function(i) {
+    discussion_threads[[i]] %>%
+      mutate(thread = paste0("Thread ", i))
+  })
+)
+```
+
+### 2. Text Pre-processing
+
+```{r}
+# Keep replies only and select required columns
+all_comments <- all_comments %>%
+  filter(!is.na(in_reply_to)) %>%
+  select(thread, uri, text)
+
+# Remove missing and empty comments
+all_comments_clean <- all_comments %>%
+  filter(
+    !is.na(text),
+    trimws(text) != ""
+  )
+
+# Check and save cleaned dataset
+dim(all_comments_clean)
+table(all_comments_clean$thread)
+
+write.csv(
+  all_comments_clean,
+  "q3a_all_comments_clean.csv",
+  row.names = FALSE
+)
+
+# Tokenization - Convert comments into individual words
+comments_tokens <- all_comments_clean %>%
+  unnest_tokens(word, text)
+
+# Remove stop words and short words
+comments_clean <- comments_tokens %>%
+  anti_join(stop_words, by = "word") %>%
+  filter(str_length(word) >= 2)
+```
+
+### 3. Calculate TF-IDF
+
+```{r}
+# Assign each comment a document ID
+comments_clean <- comments_clean %>%
+  mutate(document_id = uri)
+
+# Count term frequency in each document
+term_frequency <- comments_clean %>%
+  count(document_id, word, name = "tf")
+
+# Calculate TF-IDF
+tfidf_data_q3a <- term_frequency %>%
+  bind_tf_idf(
+    term = word,
+    document = document_id,
+    n = tf
+  )
+```
+
+### 4. Construct TF-IDF Document-Term Matrix
+
+```{r}
+dtm_tfidf_q3a <- tfidf_data_q3a %>%
+  select(document_id, word, tf_idf) %>%
+  pivot_wider(
+    names_from = word,
+    values_from = tf_idf,
+    values_fill = 0
+  )
+
+# Convert to numeric matrix
+dtm_tfidf_numeric_q3a <- as.matrix(
+  dtm_tfidf_q3a %>%
+    select(-document_id)
+)
+
+# Keep thread labels for subsequent analysis
+document_info_q3a <- dtm_tfidf_q3a %>%
+  select(document_id) %>%
+  left_join(
+    comments_clean %>%
+      distinct(document_id, thread),
+    by = "document_id"
+  )
+
+# Check final DTM
+dim(dtm_tfidf_numeric_q3a)
+```
+
+## Question 3B: Determine Optimal Number of Clusters
+
+**Method Selection**
+
+- The Silhouette Method was used to determine the optimal number of clusters for the TF-IDF document-term matrix. The number of clusters (K) was tested from 2 to 10 using K-means clustering.
+
+- The Average Silhouette Width was calculated for each value of K to evaluate intra-cluster cohension and inter-cluster separation. A higher score indicates better clustering quality.
+
+### 1. Calculate Euclidean distance
+
+```{r}
+distance_matrix <- dist(dtm_tfidf_numeric_q3a)
+```
+
+### 2. Calculate Average Silhouette Width for each K
+
+```{r}
+set.seed(123) # set random seed for reproducibility
+
+# Define the range of K values
+k_values <- 2:10
+silhouette_results <- data.frame()
+
+# Test different numbers of clusters
+for (k in k_values) {
+  
+  # Apply K-means
+  km <- kmeans(
+    dtm_tfidf_numeric_q3a,
+    centers = k,
+    nstart = 25,
+    iter.max = 100
+  )
+  
+  # Calculate Silhouette Width for this K
+  sil <- silhouette(
+    km$cluster,
+    distance_matrix
+  )
+  
+  # Calculate Average Silhouette Width
+  avg_sil <- mean(sil[, "sil_width"])
+  
+  silhouette_results <- rbind(
+    silhouette_results,
+    data.frame(
+      K = k,
+      Average_Silhouette_Width = avg_sil
+    )
+  )
+}
+
+# Display results
+print(silhouette_results)
+```
+
+### 3. Identify optimal K
+
+```{r}
+optimal_k <- silhouette_results$K[
+  which.max(silhouette_results$Average_Silhouette_Width)
+]
+
+print(optimal_k)
+```
+
+### 4. Visualize Silhouette Scores
+
+```{r}
+plot(
+  silhouette_results$K,
+  silhouette_results$Average_Silhouette_Width,
+  type = "b",
+  pch = 19,
+  xlab = "Number of Clusters (K)",
+  ylab = "Average Silhouette Width",
+  main = "Silhouette Method for Choosing K"
+)
+```
+
+**Result:** The results showed that K = 6 achieved the highest Average Silhouette Width of 0.4333. Although the score for K = 2 to K = 6 were relatively similar, the score decreased considerably when K exceeded 5.
+
+Therefore, K = 6 was selected as the optimal number of clusters based on the highest Average Silhouette Width.
+
+## Question 3C: Apply Clustering Technique
+
+**Clustering Method: K-means**
+
+- Compatibility with numerical data: TF-IDF converts comments into numerical vectors. K-means can utilize these vectors to calculate distances and perform clustering.
+
+- Alignment with clustering objectives: The goal is to group comments with similar content into the same cluster. K-means achieve this by minimizing the sum of squared distances from data points to the centroid of their respective cluster (Within-Cluster Sum of Squares).
+
+- Predefined number of clusters: We employed the Silhouette Method in Q3B and determined that K = 6. K-means allows for the specification of the number of clusters in advance via the cluster centers.
+
+**Explain Parameter Choices**
+
+- centers = 6: Divide comments into 6 clusters, following the optimal number of clusters identified in Question 3B.
+
+- nstart = 25: Performs 25 different centroid initializations to find a better solution.
+
+- iter.max = 100: Sets a maximum limit on the number of iterations.
+
+- set.seed(123): Ensures the results can be replicated when the code is run again.
+
+### 1. Apply K-means clustering
+
+```{r}
+# Set random seed for reproducibility
+set.seed(123)
+
+# Perform K-means clustering
+kmeans_result_q3c <- kmeans(
+  dtm_tfidf_numeric_q3a,
+      centers = 6,
+      nstart = 25,
+      iter.max = 100
+)
+```
+
+### 2. Display the number of comments in each cluster
+
+```{r}
+cluster_sizes <- table(kmeans_result_q3c$cluster)
+print(cluster_sizes)
+```
+
+### 3. Evaluate clustering results
+
+```{r}
+clustering_evaluation <- data.frame(
+  Total_Within_SS = kmeans_result_q3c$tot.withinss,
+  Between_SS = kmeans_result_q3c$betweenss,
+  Total_SS = kmeans_result_q3c$totss,
+  Between_SS_Ration = kmeans_result_q3c$betweenss /
+    kmeans_result_q3c$totss
+)
+
+print(clustering_evaluation)
+```
+
+### 4. Combine cluster assignments with original thread labels
+
+```{r}
+clustered_comments_q3c <- document_info_q3a %>%
+  mutate(
+    cluster = factor(kmeans_result_q3c$cluster)
+  )
+
+# View the results
+head(clustered_comments_q3c)
+```
+
+**Conclusion** The K-means algorithm produced six clusters, although the cluster sizes were highly uneven. The largest cluster contained 201 comments, while the remaining clusters contained 10, 1, 1, 1, and 1 comments, respectively. Further inspections showed that comments in the smaller clusters were generally very short, consisting of only 1-8 words. These comments may have distinctive TF-IDF representations compared with the majority of comments. This suggests that the clustering result may partly reflect differences in comment characteristics rather than clearly separated discussion topics.
+
+## Question 3D: Visualize Clustering Results in 2D
+
+### 1. Apply Multidimensional Scaling (MDS) to reduce the data to 2 dimensions
+
+```{r}
+mds_result_q3d <- cmdscale(
+  dist(dtm_tfidf_numeric_q3a),
+  k = 2
+)
+```
+
+### 2. Combine MDS coordinates with clustering results
+
+```{r}
+mds_data_q3d <- data.frame(
+  Dim1 = mds_result_q3d[, 1],
+  Dim2 = mds_result_q3d[, 2],
+  cluster = clustered_comments_q3c$cluster,
+  thread = clustered_comments_q3c$thread
+)
+```
+
+### 3. Visualize the clustering results
+
+```{r}
+mds_plot_q3d <- ggplot(
+  mds_data_q3d,
+  aes(
+    x = Dim1, 
+    y = Dim2, 
+    color = factor(cluster), 
+    shape = factor(thread)
+  )
+) +
+  geom_point(
+    size = 3.5, 
+    alpha = 0.7
+  ) +
+  coord_fixed(ratio = 1) + # Ensure a 1:1 ration between X-axis and Y-axis
+  labs(
+    title = "MDS Visualization of K-means Clustering",
+    x = "Dimension 1",
+    y = "Dimension 2",
+    color = "Cluster",
+    shape = "Original Thread"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(
+      face = "bold", 
+      hjust = 0.5, 
+      size = 14),
+    legend.position = "right"
+  )
+
+# Display the plot
+print(mds_plot_q3d)
+
+# Save the plot
+ggsave(
+  "q3d_mds_visualization.png",
+  plot = mds_plot_q3d,
+  width = 10,
+  height = 7,
+  dpi = 300
+)
+```
+
+## Question 3E: Relationship Between Clusters and Original Threads
+
+### 1. Create a contingency table
+
+```{r}
+thread_cluster_table <- table(
+  Thread = clustered_comments_q3c$thread,
+  Cluster = clustered_comments_q3c$cluster
+)
+
+print(thread_cluster_table)
+```
+
+### 2. Calculate the percentage distribution
+
+```{r}
+thread_cluster_percentage <- round(
+  prop.table(thread_cluster_table, margin = 1) * 100,
+  2
+)
+
+print(thread_cluster_percentage)
+```
+
+**Conclusion**
+
+- The relationship between the resulting clusters and the original thread labels was examined using a contingency table and row-wise percentage distribution.
+
+- The results show that Cluster 1 contains the majority of comments from all three original threads, accounting for 82.35% of Thread 1, 97.96% of Thread 2, and 98.98% of Thread 3. In contrast, Thread 1 has a more dispersed distribution, with 14.71% of its comments assigned to Cluster 3 and a small number assigned to Clusters 2 and 4. Meanwhile, almost all comments from Threads 2 and 3 are grouped into Cluster 3, very small number assigned to Clusters 6 and 5.
+
+- Overall, the clusters do not correspond closely to the original thread labels. Instead, comments from different threads are predominantly grouped together in Cluster 3. This suggests that the comments may share similar textual characteristics across the three discussions, rather than forming distinct clusters based on their original threads. However, further examination of the words and themes within each cluster would be needed to understand these similarities.
+
+# Question 4: Network Analysis (Bluesky)
+
+## Question 4A: Identify the Three Most Active Users
+
+### 1. Count posts by each user
+
+```{r}
+user_ranking <- analysis_export %>%
+  group_by(author_handle) %>%
+  summarize(
+    post_count = n(),
+    author_did = first(sub( # retrieve and save DID from each post's URI
+      "^at://([^/]+)/.*$",
+      "\\1",
+      uri
+    )),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(post_count))
+```
+
+### 2. Display Top 3 users
+
+```{r}
+top3_users <- head(user_ranking, 3)
+
+print(top3_users)
+
+# Export Top 3 users
+write.csv(
+  top3_users,
+  "q4a_top3_users.csv",
+   row.names = FALSE
+)
+```
+
+## Question 4B: Retrieve Followers and Following
+
+### 1. Collect followers and following
+
+```{r}
+# Create empty lists to store API results
+followers_list <- list()
+following_list <- list()
+
+# Loop through the Top 3 users
+for (i in seq_len(nrow(top3_users))) {
+  
+  # Get current user's information
+  current_did <- top3_users$author_did[i]
+  current_handle <- top3_users$author_handle[i]
+  
+  message("Collecting network for: ", current_handle)
+  
+  # 1.1 Get followers
+  current_followers <- tryCatch(
+    atrrr::get_followers(
+      actor = current_did,
+      limit = 50
+    ), 
+    error = function(e) {
+      message("Error retrieving followers: ", e$message)
+      NULL
+    }
+  )
+  
+  # Keep maximum 50 followers
+  if (!is.null(current_followers) && nrow(current_followers) > 0) {
+    
+    current_followers <- current_followers %>%
+      slice_head(n = 50) %>%
+      mutate(
+        target_user_did = current_did,
+        target_user_handle = current_handle
+      )
+    
+    followers_list[[i]] <- current_followers
+  } else {
+    followers_list[[i]] <- tibble
+  }
+  
+  # 1.2 Get following accounts
+  current_following <- tryCatch(
+    atrrr::get_follows(
+      actor = current_did,
+      limit = 50
+    ),
+    error = function(e) {
+      message("Error retrieving following: ", e$message)
+      NULL
+    }
+  )
+  
+  # Keep maximum 50 following accounts
+  if(!is.null(current_following) && nrow(current_following) > 0) {
+    
+    current_following <- current_following %>%
+      slice_head(n = 50) %>%
+      mutate(
+        source_user_did = current_did,
+        source_user_handle = current_handle
+      )
+    
+    following_list[[i]] <- current_following
+  } else {
+    following_list[[i]] <- tibble()
+  }
+  
+  # Short pause between users
+  Sys.sleep(1)
+}
+
+# 1.3 Combine results from all 3 users
+all_followers <- bind_rows(followers_list)
+all_following <- bind_rows(following_list)
+
+# 1.4 Inspect collection results
+cat("\nTotal followers:", nrow(all_followers), "\n")
+cat("Total following:", nrow(all_following), "\n")
+
+# 1.5 Check number of records for each selected user
+print(
+  all_followers %>%
+    count(target_user_handle, name = "follower_count")
+)
+
+print(
+  all_following %>%
+    count(source_user_handle, name = "following_count")
+)
+```
+
+### 2. Create network edge list
+
+```{r}
+# 2.1 Create edges from followers to selected users
+edges_from_followers <- all_followers %>%
+  transmute(
+    from_did = did,
+    to_did = target_user_did,
+    from_handle = actor_handle,
+    to_handle = target_user_handle
+  )
+
+# 2.2 Create edges from selected users to accounts they follow
+edges_from_following <- all_following %>%
+  transmute(
+    from_did = source_user_did,
+    to_did = did,
+    from_handle = source_user_handle,
+    to_handle = actor_handle
+  )
+
+# 2.3 Combine both types of edges
+all_edges <- bind_rows(
+  edges_from_followers,
+  edges_from_following
+)
+
+# 2.4 Remove duplicate directed edges
+all_edges <- all_edges %>%
+  distinct(from_did, to_did, .keep_all = TRUE)
+
+# 2.5 Inspect edge list
+cat("Total unique edges:", nrow(all_edges), "\n")
+print(head(all_edges, 10))
+```
+
+### 3. Create node list
+
+```{r}
+nodes_from <- all_edges %>%
+  select(did = from_did, handle = from_handle)
+
+nodes_to <- all_edges %>%
+  select(did = to_did, handle = to_handle)
+
+all_nodes <- bind_rows(nodes_from, nodes_to) %>%
+  distinct(did, .keep_all = TRUE)
+
+cat("Total unique nodes:", nrow(all_nodes), "\n")
+
+# Identify the three selected users
+all_nodes <- all_nodes %>%
+  mutate(
+    selected_user = did %in% top3_users$author_did
+  )
+
+print(all_nodes %>% count(selected_user))
+```
+
+### 4. Create directed network graph
+
+```{r}
+# Prepare edge data
+graph_edges <- all_edges %>%
+  transmute(
+    from = from_did,
+    to = to_did
+  )
+
+# Prepare vertex data
+graph_nodes <- all_nodes %>%
+  transmute(
+    name = did,
+    handle = handle,
+    selected_user = selected_user
+  )
+
+# Create directed graph
+network_graph <- graph_from_data_frame(
+  d = graph_edges,
+  directed = TRUE,
+  vertices = graph_nodes
+)
+
+# Check graph information
+cat("Number of vertices:", vcount(network_graph), "\n")
+cat("Number of edges:", ecount(network_graph), "\n")
+cat("Is directed:", is_directed(network_graph), "\n")
+```
+
+### 5. Visualize network
+
+```{r}
+# Set node colors
+V(network_graph)$color <- ifelse(
+  V(network_graph)$selected_user,
+  "orange", 
+  "lightblue"
+)
+
+# Set node sizes
+V(network_graph)$size <- ifelse(
+  V(network_graph)$selected_user,
+  14, 
+  5
+)
+
+# Use shorter labels for the Top 3 users
+top3_labels <- c(
+  "GameDropStation",
+  "iGeek Gamer",
+  "The Daily Game News"
+)
+
+V(network_graph)$label <- NA
+
+selected_indices <- which(V(network_graph)$selected_user)
+
+V(network_graph)$label[selected_indices] <- top3_labels[
+  match(
+    V(network_graph)$name[selected_indices],
+    top3_users$author_did
+  )
+]
+
+# Generate network layout
+set.seed(123)
+network_layout <- layout_with_fr(network_graph)
+
+# Plot network
+plot(
+  network_graph,
+  layout = network_layout,
+  vertex.color = V(network_graph)$color,
+  vertex.size = V(network_graph)$size,
+  vertex.label = V(network_graph)$label,
+  vertex.label.cex = 0.75,
+  vertex.label.dist = 2.5,
+  vertex.label.color = "black",
+  edge.arrow.size = 0.18,
+  edge.width = 0.5,
+  edge.color = "grey75",
+  main = "Bluesky Follow Network - CONTROL Resonant"
+)
+
+# Add legend
+legend(
+  "topleft",
+  legend = c("Top 3 active users", "Other accounts"),
+  col = c("orange", "lightblue"),
+  pch = 19,
+  pt.cex = c(1.5, 1),
+  bty = "n"
+)
+```
+
+### 6. Export data
+
+```{r}
+# Keep only necessary columns
+followers_export <- all_followers %>%
+  select(
+    did, actor_handle, actor_name,
+    target_user_did,
+    target_user_handle
+  )
+
+following_export <- all_following %>%
+  select(
+    did, actor_handle, actor_name,
+    source_user_did,
+    source_user_handle
+  )
+
+# Export CSV files
+write.csv(
+  followers_export,
+  "q4b_followers.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  following_export,
+  "q4b_following.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  all_edges,
+  "q4b_edges.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  all_nodes,
+  "q4b_nodes.csv",
+  row.names = FALSE
+)
+```
+
+## Question 4C: Network Centrality and PageRank
+
+### 1. Calculate centrality metrics
+
+```{r}
+in_degree <- degree(network_graph, mode = "in", normalized = TRUE)
+
+out_degree <- degree(network_graph, mode = "out", normalized = TRUE)
+
+pagerank_score <- page_rank(network_graph, directed = TRUE)$vector
+
+# Combine results into one table
+centrality_results <- data.frame(
+  did = V(network_graph)$name,
+  handle = V(network_graph)$handle,
+  in_degree = as.numeric(in_degree),
+  out_degree = as.numeric(out_degree),
+  pagerank = as.numeric(pagerank_score)
+)
+
+head(centrality_results)
+
+# Export the centrality result
+write.csv(
+  centrality_results,
+  "q4c_centrality_result.csv",
+  row.names = FALSE
+)
+```
+
+### 2. Identify top users based on specific metrics
+
+```{r}
+# Top user by in-degree centrality
+top_in_degree <- centrality_results %>%
+  slice_max(order_by = in_degree, n = 1, with_ties = TRUE) %>%
+  select(handle, in_degree)
+
+# Top user by out-degree centrality
+top_out_degree <- centrality_results %>%
+  slice_max(order_by = out_degree, n = 1, with_ties = TRUE) %>%
+  select(handle, out_degree)
+
+# Top user by PageRank
+top_pagerank <- centrality_results %>%
+  slice_max(order_by = pagerank, n = 1, with_ties = TRUE) %>%
+  select(handle, pagerank)
+
+# Display results
+cat("Top user by In-degree Centrality:\n")
+print(top_in_degree)
+
+cat("Top user by Out-degree Centrality:\n")
+print(top_out_degree)
+
+cat("Top user by PageRank:\n")
+print(top_pagerank)
+
+# Export the result
+write.csv(
+  top_in_degree,
+  "q4c_top_in_degree.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  top_out_degree,
+  "q4c_top_out_degree.csv",
+  row.names = FALSE
+)
+
+write.csv(
+  top_pagerank,
+  "q4c_top_pagerank.csv",
+  row.names = FALSE
+)
+```
+
+**Centrality Analysis and Discussion**
+
+- Three network centrality measures were calculated for all 207 nodes: in-degree centrality, out-degree centrality, and PageRank.
+
+- In-degree centrality: The three selected users shared the highest in-degree centrality score of 0.24510. Each account had 50 incoming connections in the collected network, indicating that 50 collected accounts followed each selected user.
+
+- Out-degree centrality: GameDropStation achieved the highest out-degree centrality score of 0.22549. This indicates that GameDropStation had the largest number of outgoing follow relationships within the collected network.
+
+- PageRank: iGeek Gamer achieved the highest PageRank score of 0.10297. Although GameDropStation had the highest out-degree centrality, it did no achieve the highest PageRank score.
+
+**Discussion: Degree Centrality versus PageRank**
+
+- The result demonstrate that the degree centrality and PageRank measure different aspects of network structure.
+
+- Degree centrality focuses on the number of direct connections a node has. For example, GameDropStation had the highest out-degree because it followed 46 accounts within the collected network.
+
+- In contrast, PageRank considers not only the number of connections but also the importance of the nodes providing those connections. Therefore, a node can receive a higher PageRank score even if it does not have the highest degree.
+
+- In this network, iGeek Gamer achieved the highest PageRank score (0.10297), despite having a lower out-degree that GameDropStation. This demonstrates that having more direct connections does not necessarily result in a higher PageRank score.
