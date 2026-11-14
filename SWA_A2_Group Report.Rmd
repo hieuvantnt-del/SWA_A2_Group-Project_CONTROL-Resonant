@@ -1,11 +1,13 @@
 ---
 title: 'The Social Pulse: Investigating a Viral Moment'
-author: "Tran Ngoc Hieu Van - 22205175"
+author: 
+- "Tran Ngoc Hieu Van - 22205175"
+- "Huynh Le Phuong Nhi - 22202437"
 date: "2026-11-09"
 output:
   pdf_document: default
   html_document: default
-subtitle: "COMP3020 Social Web Analytics - Group Project"
+subtitle: "COMP3020 Social Web Analytics - A2 Group Project"
 ---
 
 ```{=html}
@@ -28,6 +30,8 @@ knitr::opts_chunk$set(
   fig.height = 5
 )
 ```
+
+**GitHub Repository:** [CONTROL Resonant - Social Web Analytics Group Project](https://github.com/hieuvantnt-del/SWA_A2_Group-Project_CONTROL-Resonant)
 
 **Load all required packages here**
 
@@ -750,9 +754,9 @@ write.csv(
 
 **State the hypothesis**
 
-- H0 (Null Hypothesis): The proportion of subtopic posts is independent with the time period.
+- H0 (Null Hypothesis): The subtopic status is independent of time period.
 
-- H1 (Alternative Hypothesis): The proportion of subtopic is associated with the time period.
+- H1 (Alternative Hypothesis): The subtopic status is associated with time period.
 
 ### 1. Create a contingency table
 
@@ -780,25 +784,37 @@ print(chi_result)
 print(chi_result$expected)
 ```
 
-**Conclusion:** Since the p_value (0.0.1498) < alpha (0.05), the null hypothesis (H0) is rejected. Additionally, all expected cell counts exceeded 5, satisfying the commonly use expected-frequency guideline for the test. Therefore, the proportion of subtopic posts is associated with the time period. Consequently, these results provide evidence of an association between the time period and subtopic classification. However, the association does not establish that the release itself caused the increase.
+**Conclusion:** Since the p_value (0.015) \< alpha (0.05), the null hypothesis (H0) is rejected. Additionally, all expected cell counts exceeded 5, satisfying the commonly use expected-frequency guideline for the test. Therefore, the subtopic status is associated with the time period. However, the association does not establish that the release itself caused the increase.
 
 ## Question 1C: Comparison of Chi-square score
 
 **Purpose of the analysis**
 
-- While Question 1B compares the proportion of Gameplay and Combat posts between the Before and After periods, the Question 1C examines how this proportion varies across 14 individual days, providing a more detailed view of daily discussion patterns.
+- In Question 1C, it examines whether the proportion of subtopic posts changed from the "Before" (past) period to the "After" (current) period, by calculating Bluesky's Chi-square score.
 
-**Baseline and denominator**
+**Baseline**
 
-- The baseline is the overall proportion of Gameplay and Combat posts among all CONTROL Resonant posts collected across 14 days. For each day, the denominator is the total number of CONTROL Resonant posts on that day, consisting of both Gameplay and Combat posts and posts outside this subtopic.
+- The baseline is the proportion of Gameplay and Combat posts among all CONTROL Resonant posts collected during the Before period (Past).
 
-- The expected frequencies are calculated based on the row totals (daily post counts) and column totals (overall Subtopic and Other counts) of the contingency table. This assumes that the proportion of Gameplay and Combat posts is independent of the day.
+- The Past proportion is also used to calculate the expected number of Gameplay and Combat posts in the Current period.
 
-**State the hypothesis**
+**Denominator**
 
-- H0 (Null Hypothesis): The proportion of Gameplay and Combat posts is independent of the event day.
+- Np: The total number of CONTROL Resonant posts collected during the Past period (Before).
 
-- H1 (Alternative Hypothesis): The proportion of Gameplay and Combat posts is associated with the event day.
+- X: The number of Gameplay and Combat posts collected during the Past period (Before).
+
+- Nc: The total number of CONTROL Resonant posts collected during the Current period (After).
+
+- Y: The number of Gameplay and Combat posts collected during the current period (After).
+
+- The denominator for each period includes all CONTROL Resonant posts, consisting of both Subtopic posts and No-Subtopic posts.
+
+- The proportion of Gameplay and Combat posts in each period is calculated as:
+
+pPast = X/Np
+
+pCurrent = Y/Nc
 
 ### 1. Prepare dataset
 
@@ -820,10 +836,13 @@ q1c_data <- bind_rows(
     by = "doc_id"
   )
 
-# 1.3 Check the result
+# 1.3 Check the dataset
 nrow(q1c_data)
-table(q1c_data$final_label, useNA = "ifany")
-table(q1c_data$post_date)
+
+# Check duplicate document IDs
+sum(duplicated(q1c_data$doc_id))
+
+# Check missing post dates
 sum(is.na(q1c_data$post_date))
 
 # Check the posts without post dates
@@ -831,61 +850,134 @@ q1c_data %>%
   filter(is.na(post_date)) %>%
   select(doc_id, final_label, post_date)
 
-# Check the result again
-sum(is.na(q1c_data$post_date))
-nrow(q1c_data)
+# Check post date distribution
 table(q1c_data$post_date)
+
+# Check classification distribution
 table(q1c_data$final_label, useNA = "ifany")
+
+
 ```
 
-### 2. Create a contingency table
+### 2. Separate Past and Current periods
 
 ```{r}
+# 2.1 Classify posts into Past and Current periods
+q1c_data <- q1c_data %>%
+  mutate(
+    post_date = as.Date(post_date),
+    period = case_when(
+      post_date >= as.Date("2026-09-17") &
+        post_date <= as.Date("2026-09-23") ~ "Past",
+      
+      post_date >= as.Date("2026-09-25") &
+        post_date <= as.Date("2026-10-01") ~ "Current",
+      
+      TRUE ~ NA_character_
+    )
+  )
+
+# 2.2 Keep only posts within the two analysis periods
+q1c_data <- q1c_data %>%
+  filter(!is.na(period))
+
+# 2.3 Check the period distribution
+
+# Check the number of posts in each period
+table(q1c_data$period)
+
+# Check the number of posts by date and period
+table(q1c_data$post_date, q1c_data$period)
+
+# Check the classification distribution by period
+table(q1c_data$period, q1c_data$final_label)
+```
+
+### 3. Create a contingency table
+
+```{r}
+# 3.1 Create the contingency table
 q1c_table <- table(
-  q1c_data$post_date,
-  q1c_data$final_label
+  factor(q1c_data$period, levels = c("Past", "Current")),
+  factor(q1c_data$final_label,
+         levels = c("Subtopic", "No-Subtopic"))
 )
 
+# 3.2 Display the contingency table
 q1c_table
+
+# 3.3 Calculate the total number of posts in each period
+rowSums(q1c_table)
+
+# 3.4 Calculate the total number of posts in each classification
+colSums(q1c_table)
+
+# 3.5 Calculate the proportion of Gameplay and Combat posts
+round(
+  q1c_table[, "Subtopic"] / rowSums(q1c_table) * 100,
+  2
+)
 ```
 
-### 3. Calculate daily subtopic proportions
+### 4. Calculate Bluesky's Chi-square score
 
 ```{r}
-daily_proportion <- prop.table(q1c_table, margin = 1)
-round(daily_proportion * 100, 2)
+# 4.1 Extract observed counts from the contingency table
+Np <- sum(q1c_table["Past", ])
+X <- q1c_table["Past", "Subtopic"]
+
+Nc <- sum(q1c_table["Current", ])
+Y <- q1c_table["Current", "Subtopic"]
+
+# Display observed counts
+Np
+X
+Nc
+Y
+
+# 4.2 Calculate the baseline and current proportions
+p_past <- X / Np
+p_current <- Y / Nc
+
+p_past
+p_current
+
+# 4.2 Calculate expected frequencies for Current
+E_subtopic <- Nc * p_past
+E_nosubtopic <- Nc - E_subtopic
+
+# Display expected frequencies
+E_subtopic
+E_nosubtopic
+
+# 4.4 Calculate Bluesky's Chi-square score
+bluesky_chisquare <-
+  ((Y - E_subtopic) ^ 2 / E_subtopic) +
+  ((Nc - Y - E_nosubtopic) ^ 2 / E_nosubtopic)
+
+# Display the final result
+bluesky_chisquare
 ```
 
-### 4. Chi-square test
+**Conclusion**
 
-```{r}
-# Perform Chi-square test of independence
-q1c_chisq <- chisq.test(q1c_table, correct = FALSE)
+- The proportion of Gameplay and Combat posts increased from 4.00% in the Past period to 5.26% in the Current period, indicating an increase of approximately 1.26%.
 
-# View the test results
-q1c_chisq
+- Based on the Past-period proportion, 193.21 Subtopic posts were expected in the Current period, whereas 254 was observed.
 
-# Check expected frequencies
-q1c_chisq$expected
+- The resulting Bluesky's Chi-square score was 19.93, illustrating a noticeable deviation from the baseline in the Past period.
 
-# Find the minimum expected frequency
-min(q1c_chisq$expected)
-
-# Count cells with expected frequency below 5
-sum(q1c_chisq$expected < 5)
-```
-
-**Conclusion** The test returned a Chi-square statistic of 24.128, with 13 degrees of freedom and a p-value of 0.02997. Since the p-value (0.02997) < alpha (0.05), the null hypothesis is rejected. This indicates a statistically significant association between the day and the proportion of subtopic posts. Therefore, the proportion of Gameplay and Combat discussions was not consistent across the 14 days.
+- These findings suggest that Gameplay and Combat discussions became more prevalent during the Current period.
 
 **Explain why the two Chi-square scores different**
 
-- The Chi-square scores obtained in Question 1B and Question 1C are different because the two tests examine the data at different levels of temporal details.
+- The two Chi-square scores differ because they use different methods to calculate the expected frequencies.
 
-- In Question 1B, posts are grouped into two periods (Before and After), producing a 2x2 contingency table. The test examines whether the proportion of Gameplay and Combat posts differs between two periods. The result is X-squared = 5.9187, df = 1, p-value = 0.01498.
+- In Question 1B, Pearson's Chi-square test of independence calculates expected frequencies based on the row and column totals of the entire contingency table. The Chi-square statistic was 5.917 (p = 0.015).
 
-- In Question 1C, posts are grouped into 14 individual days, producing a 14x2 contingency table. This test examines whether the proportion of Subtopic posts varies across individual days. The result is X-squared = 24.128, df = 13, p-value = 0.02997.
+- In Question 1C, it calculates Bluesky's Chi-square score by using the Subtopic proportion in the Past period as the baseline. This baseline proportion (4.00%) is used to calculate the expected number of Subtopic posts in the Current period. While the expected number was 193.21, the observed number was 254, resulting in a Chi-square score of 19.93.
 
-- The scores differ because the tests use different time groupings, contingency table dimensions, expected frequencies and degrees of freedom. Question 1B focuses on the overall difference between the two period Before and After, whereas Question 1C captures daily variations that may hidden when posts are aggregated into two periods.
+- Consequently, although both calculations use the same observed dataset, they produce different scores because their expected frequencies are calculated differently.
 
 ## Question 1D: Simple Linear Regression
 
@@ -954,9 +1046,9 @@ ggsave(
 
 **Interpretation the slope and R-squared:**
 
-- The slope is 28.60 indicates that the predicted number of posts increased by approximately 28.60 posts per day.
+- The slope is 28.52 indicates that the predicted number of posts increased by approximately 28.52 posts per day.
 
-- The R-squared value of 0.3478 indicates that time explains approximately 34.78% of the variation in daily posts counts, while the remaining 65.22% is unexplained by the linear model. Although the positive slope is statistically significant (p = 0.02643), the scatter plot shows considerable day-to-day fluctuations, with some sharp increases and decreases.
+- The R-squared value of 0.3461 indicates that time explains approximately 34.61% of the variation in daily posts counts, while the remaining 65.39% is unexplained by the linear model. Although the positive slope is statistically significant (p-value = 0.02691), the scatter plot shows considerable day-to-day fluctuations, with some sharp increases and decreases.
 
 - Therefore, the model suggests a positive linear trend overall, but the relationship is not strongly linear, and time alone does not adequately explain the chnages in daily post activity.
 
@@ -1379,9 +1471,9 @@ plot(
 )
 ```
 
-**Result:** The results showed that K = 6 achieved the highest Average Silhouette Width of 0.4333. Although the score for K = 2 to K = 6 were relatively similar, the score decreased considerably when K exceeded 5.
+**Result:** The results showed that K = 5 achieved the highest Average Silhouette Width of 0.4333. Although the score for K = 2 to K = 5 were relatively similar, the score decreased considerably when K exceeded 5.
 
-Therefore, K = 6 was selected as the optimal number of clusters based on the highest Average Silhouette Width.
+Therefore, K = 5 was selected as the optimal number of clusters based on the highest Average Silhouette Width.
 
 ## Question 3C: Apply Clustering Technique
 
@@ -1391,11 +1483,11 @@ Therefore, K = 6 was selected as the optimal number of clusters based on the hig
 
 - Alignment with clustering objectives: The goal is to group comments with similar content into the same cluster. K-means achieve this by minimizing the sum of squared distances from data points to the centroid of their respective cluster (Within-Cluster Sum of Squares).
 
-- Predefined number of clusters: We employed the Silhouette Method in Q3B and determined that K = 6. K-means allows for the specification of the number of clusters in advance via the cluster centers.
+- Predefined number of clusters: We employed the Silhouette Method in Q3B and determined that K = 5. K-means allows for the specification of the number of clusters in advance via the cluster centers.
 
 **Explain Parameter Choices**
 
-- centers = 6: Divide comments into 6 clusters, following the optimal number of clusters identified in Question 3B.
+- centers = 5: Divide comments into 5 clusters, following the optimal number of clusters identified in Question 3B.
 
 - nstart = 25: Performs 25 different centroid initializations to find a better solution.
 
@@ -1412,7 +1504,7 @@ set.seed(123)
 # Perform K-means clustering
 kmeans_result_q3c <- kmeans(
   dtm_tfidf_numeric_q3a,
-      centers = 6,
+      centers = 5,
       nstart = 25,
       iter.max = 100
 )
@@ -1451,7 +1543,7 @@ clustered_comments_q3c <- document_info_q3a %>%
 head(clustered_comments_q3c)
 ```
 
-**Conclusion** The K-means algorithm produced six clusters, although the cluster sizes were highly uneven. The largest cluster contained 201 comments, while the remaining clusters contained 10, 1, 1, 1, and 1 comments, respectively. Further inspections showed that comments in the smaller clusters were generally very short, consisting of only 1-8 words. These comments may have distinctive TF-IDF representations compared with the majority of comments. This suggests that the clustering result may partly reflect differences in comment characteristics rather than clearly separated discussion topics.
+**Conclusion** The K-means algorithm produced six clusters, although the cluster sizes were highly uneven. The largest cluster contained 202 comments, while the remaining clusters contained 11, 1, 1, and 1 comments, respectively. Further inspections showed that comments in the smaller clusters were generally very short, consisting of only 1-8 words. These comments may have distinctive TF-IDF representations compared with the majority of comments. This suggests that the clustering result may partly reflect differences in comment characteristics rather than clearly separated discussion topics.
 
 ## Question 3D: Visualize Clustering Results in 2D
 
@@ -1549,7 +1641,7 @@ print(thread_cluster_percentage)
 
 - The relationship between the resulting clusters and the original thread labels was examined using a contingency table and row-wise percentage distribution.
 
-- The results show that Cluster 1 contains the majority of comments from all three original threads, accounting for 82.35% of Thread 1, 97.96% of Thread 2, and 98.98% of Thread 3. In contrast, Thread 1 has a more dispersed distribution, with 14.71% of its comments assigned to Cluster 3 and a small number assigned to Clusters 2 and 4. Meanwhile, almost all comments from Threads 2 and 3 are grouped into Cluster 3, very small number assigned to Clusters 6 and 5.
+- The results show that Cluster 3 contains the majority of comments from all three original threads, accounting for 82.61% of Thread 1, 97.96% of Thread 2, and 98.98% of Thread 3. In contrast, Thread 1 has a more dispersed distribution, with 13.04% of its comments assigned to Cluster 4 and a small number assigned to Clusters 1, 2, and 5. Meanwhile, almost all comments from Threads 2 and 3 are grouped into Cluster 3, very small number assigned to Cluster 4.
 
 - Overall, the clusters do not correspond closely to the original thread labels. Instead, comments from different threads are predominantly grouped together in Cluster 3. This suggests that the comments may share similar textual characteristics across the three discussions, rather than forming distinct clusters based on their original threads. However, further examination of the words and themes within each cluster would be needed to understand these similarities.
 
@@ -1822,7 +1914,7 @@ plot(
   vertex.size = V(network_graph)$size,
   vertex.label = V(network_graph)$label,
   vertex.label.cex = 0.75,
-  vertex.label.dist = 2.5,
+  vertex.label.dist = 4,
   vertex.label.color = "black",
   edge.arrow.size = 0.18,
   edge.width = 0.5,
@@ -1965,13 +2057,13 @@ write.csv(
 
 **Centrality Analysis and Discussion**
 
-- Three network centrality measures were calculated for all 207 nodes: in-degree centrality, out-degree centrality, and PageRank.
+- Three network centrality measures were calculated for all 202 nodes: in-degree centrality, out-degree centrality, and PageRank.
 
-- In-degree centrality: The three selected users shared the highest in-degree centrality score of 0.24510. Each account had 50 incoming connections in the collected network, indicating that 50 collected accounts followed each selected user.
+- In-degree centrality: The three selected users shared the highest in-degree centrality score of 0.2488. Each account had 50 incoming connections in the collected network, indicating that 50 collected accounts followed each selected user.
 
-- Out-degree centrality: GameDropStation achieved the highest out-degree centrality score of 0.22549. This indicates that GameDropStation had the largest number of outgoing follow relationships within the collected network.
+- Out-degree centrality: GameDropStation achieved the highest out-degree centrality score of 0.2239. This indicates that GameDropStation had the largest number of outgoing follow relationships within the collected network.
 
-- PageRank: iGeek Gamer achieved the highest PageRank score of 0.10297. Although GameDropStation had the highest out-degree centrality, it did no achieve the highest PageRank score.
+- PageRank: iGeek Gamer achieved the highest PageRank score of 0.1024. Although GameDropStation had the highest out-degree centrality, it did no achieve the highest PageRank score.
 
 **Discussion: Degree Centrality versus PageRank**
 
@@ -1981,4 +2073,4 @@ write.csv(
 
 - In contrast, PageRank considers not only the number of connections but also the importance of the nodes providing those connections. Therefore, a node can receive a higher PageRank score even if it does not have the highest degree.
 
-- In this network, iGeek Gamer achieved the highest PageRank score (0.10297), despite having a lower out-degree that GameDropStation. This demonstrates that having more direct connections does not necessarily result in a higher PageRank score.
+- In this network, iGeek Gamer achieved the highest PageRank score (0.1025), despite having a lower out-degree that GameDropStation. This demonstrates that having more direct connections does not necessarily result in a higher PageRank score.
