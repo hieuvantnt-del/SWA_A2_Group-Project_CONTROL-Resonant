@@ -27,7 +27,8 @@ knitr::opts_chunk$set(
   message = FALSE,
   fig.align = "center",
   fig.width = 8,
-  fig.height = 5
+  fig.height = 5,
+  out.width = "85%"
 )
 ```
 
@@ -47,9 +48,9 @@ library(tidytext)
 library(tidyverse)
 ```
 
-# 1 Introduction
+# Introduction
 
-## 1.1 Topic and Event Description
+## Topic and Event Description
 
 - Main topic: CONTROL Resonant
 - Specific event: Release Day of CONTROL Resonant
@@ -58,16 +59,16 @@ library(tidyverse)
 - Data source: Bluesky
 - Data collection period: Before event (17/09/2026 - 23/09/2026) and After event (25/09/2026 - 01/10/2026)
 
-## 1.2 Research Objectives
+## Research Objectives
 
 - Objective 1: Investigate changes in discussion volume and subtopic proportions.
 - Objective 2: Identify discussion themes through text mining.
 - Objective 3: Discover comment clusters and their relationships with discussion threads.
 - Objective 4: Investigate the interaction network of active users.
 
-# 2. Question 1: Trend & Time Series Analysis
+# Question 1: Trend & Time Series Analysis
 
-## Collect and clean dataset
+## 1. Collect and clean dataset
 
 ```{r}
 # 1. Set the event date and collection periods
@@ -209,7 +210,7 @@ after_export <- after_clean %>%
 analysis_export <- bind_rows(before_export, after_export)
 ```
 
-## Export the cleaned dataset for further analysis
+## 2. Export the cleaned dataset for further analysis
 
 ```{r}
 write.csv(before_export, "data/before_clean.csv", row.names = FALSE)
@@ -337,7 +338,7 @@ write.csv(
 ```
 
 ```{r}
-# Import the manually labelled reference sample to preserve the human annotations and ensure consistent classification results when knitting the report
+# Import the manually labelled reference sample
 reference_sample <- read.csv(
   "data/reference_sample_200.csv",
   stringsAsFactors = FALSE,
@@ -530,9 +531,8 @@ no_subtopic_similarity <- apply(
 
 ### 8. Create classification suggestions
 
-#### 8.1 Generate automatic classification suggestions
-
 ```{r}
+# 8.1 Generate automatic classification suggestions
 classification_suggestions <- unlabelled_data %>%
   filter(doc_id %in% rownames(similarity_matrix)) %>%
   mutate(
@@ -556,9 +556,8 @@ head(classification_suggestions %>%
 table(classification_suggestions$suggested_label)
 ```
 
-#### 8.2 Export posts for manual review
-
 ```{r, eval=FALSE}
+# 8.2 Export posts for manual review
 manual_review <- classification_suggestions %>%
   filter(
     subtopic_similarity == 0 &
@@ -577,11 +576,8 @@ manual_review <- classification_suggestions %>%
     similarity_gap,
     manual_label
   )
-```
 
-#### 8.3 Export CSV file for manual labels
-
-```{r, eval =FALSE}
+# 8.3 Export CSV file for manual labels
 write.csv(
   manual_review,
   "manual_review_posts.csv",
@@ -590,9 +586,8 @@ write.csv(
 )
 ```
 
-#### 8.4 Import manually reviewed posts
-
 ```{r}
+# 8.4 Import manually reviewed posts
 manual_review_completed <- read.csv(
   "manual_review_posts.csv",
   stringsAsFactors = FALSE,
@@ -626,9 +621,8 @@ nrow(matched_posts)
 stopifnot(nrow(matched_posts) == 73)
 ```
 
-#### 8.5 Merge manual labels with automatic classification
-
 ```{r}
+# 8.5 Merge manual labels with automatic classification
 unlabelled_classification_final <- classification_suggestions %>%
   left_join(
     matched_posts %>%
@@ -652,9 +646,8 @@ sum(is.na(unlabelled_classification_final$final_label))
 nrow(unlabelled_classification_final)
 ```
 
-#### 8.6 Identify posts excluded from TF-IDF classification and create dataset
-
 ```{r}
+# 8.6 Identify posts excluded from TF-IDF classification and create dataset
 posts_without_tfidf <- unlabelled_data %>%
   anti_join(
     unlabelled_classification_final %>% select(doc_id),
@@ -672,19 +665,16 @@ posts_without_tfidf_final <- posts_without_tfidf
 table(posts_without_tfidf_final$final_label, useNA = "ifany")
 ```
 
-#### 8.7 Merge reference dataset and dataset of posts without TF-IDF into the final classification dataset
-
 ```{r}
+# 8.7 Combine all classified posts
+
 # Reference posts
 reference_final <- reference_data %>%
   mutate(
     final_label = manual_label
   )
-```
 
-#### 8.8 Combine all classified posts
-
-```{r}
+# Finalize the classification dataset
 classification_final <- bind_rows(
   reference_final %>%
     select(doc_id, period, text, final_label),
@@ -790,11 +780,11 @@ print(chi_result$expected)
 
 **Purpose of the analysis**
 
-- In Question 1C, it examines whether the proportion of subtopic posts changed from the "Before" (past) period to the "After" (current) period, by calculating Bluesky's Chi-square score.
+- Question 1C examines whether the proportion of subtopic posts changed from the Before (Past) period to the After (Current) period, by calculating Bluesky's Chi-square score.
 
 **Baseline**
 
-- The baseline is the proportion of Gameplay and Combat posts among all CONTROL Resonant posts collected during the Before period (Past).
+- The baseline is the proportion of Gameplay and Combat posts among all CONTROL Resonant posts collected during the Past period.
 
 - The Past proportion is also used to calculate the expected number of Gameplay and Combat posts in the Current period.
 
@@ -806,7 +796,7 @@ print(chi_result$expected)
 
 - Nc: The total number of CONTROL Resonant posts collected during the Current period (After).
 
-- Y: The number of Gameplay and Combat posts collected during the current period (After).
+- Y: The number of Gameplay and Combat posts collected during the Current period (After).
 
 - The denominator for each period includes all CONTROL Resonant posts, consisting of both Subtopic posts and No-Subtopic posts.
 
@@ -855,8 +845,6 @@ table(q1c_data$post_date)
 
 # Check classification distribution
 table(q1c_data$final_label, useNA = "ifany")
-
-
 ```
 
 ### 2. Separate Past and Current periods
@@ -963,9 +951,9 @@ bluesky_chisquare
 
 - The proportion of Gameplay and Combat posts increased from 4.00% in the Past period to 5.26% in the Current period, indicating an increase of approximately 1.26%.
 
-- Based on the Past-period proportion, 193.21 Subtopic posts were expected in the Current period, whereas 254 was observed.
+- Based on the Past-period proportion, 193.17 Subtopic posts were expected in the Current period, whereas 254 was observed.
 
-- The resulting Bluesky's Chi-square score was 19.93, illustrating a noticeable deviation from the baseline in the Past period.
+- The resulting Bluesky's Chi-square score was 19.96, illustrating a noticeable deviation from the baseline in the Past period.
 
 - These findings suggest that Gameplay and Combat discussions became more prevalent during the Current period.
 
@@ -975,7 +963,7 @@ bluesky_chisquare
 
 - In Question 1B, Pearson's Chi-square test of independence calculates expected frequencies based on the row and column totals of the entire contingency table. The Chi-square statistic was 5.917 (p = 0.015).
 
-- In Question 1C, it calculates Bluesky's Chi-square score by using the Subtopic proportion in the Past period as the baseline. This baseline proportion (4.00%) is used to calculate the expected number of Subtopic posts in the Current period. While the expected number was 193.21, the observed number was 254, resulting in a Chi-square score of 19.93.
+- In Question 1C, it calculates Bluesky's Chi-square score by using the Subtopic proportion in the Past period as the baseline. This baseline proportion (4.00%) is used to calculate the expected number of Subtopic posts in the Current period. While the expected number was 193.17, the observed number was 254, resulting in a Chi-square score of 19.96.
 
 - Consequently, although both calculations use the same observed dataset, they produce different scores because their expected frequencies are calculated differently.
 
@@ -1046,9 +1034,9 @@ ggsave(
 
 **Interpretation the slope and R-squared:**
 
-- The slope is 28.52 indicates that the predicted number of posts increased by approximately 28.52 posts per day.
+- The slope is 28.48 indicates that the predicted number of posts increased by approximately 28.48 posts per day.
 
-- The R-squared value of 0.3461 indicates that time explains approximately 34.61% of the variation in daily posts counts, while the remaining 65.39% is unexplained by the linear model. Although the positive slope is statistically significant (p-value = 0.02691), the scatter plot shows considerable day-to-day fluctuations, with some sharp increases and decreases.
+- The R-squared value of 0.3452 indicates that time explains approximately 34.52% of the variation in daily posts counts, while the remaining 65.48% is unexplained by the linear model. Although the positive slope is statistically significant (p-value = 0.02715), the scatter plot shows considerable day-to-day fluctuations, with some sharp increases and decreases.
 
 - Therefore, the model suggests a positive linear trend overall, but the relationship is not strongly linear, and time alone does not adequately explain the chnages in daily post activity.
 
@@ -1543,7 +1531,7 @@ clustered_comments_q3c <- document_info_q3a %>%
 head(clustered_comments_q3c)
 ```
 
-**Conclusion** The K-means algorithm produced six clusters, although the cluster sizes were highly uneven. The largest cluster contained 202 comments, while the remaining clusters contained 11, 1, 1, and 1 comments, respectively. Further inspections showed that comments in the smaller clusters were generally very short, consisting of only 1-8 words. These comments may have distinctive TF-IDF representations compared with the majority of comments. This suggests that the clustering result may partly reflect differences in comment characteristics rather than clearly separated discussion topics.
+**Conclusion** The K-means algorithm produced 5 clusters, although the cluster sizes were highly uneven. The largest cluster contained 202 comments, while the remaining clusters contained 11, 1, 1, and 1 comments, respectively. Further inspections showed that comments in the smaller clusters were generally very short, consisting of only 1-8 words. These comments may have distinctive TF-IDF representations compared with the majority of comments. This suggests that the clustering result may partly reflect differences in comment characteristics rather than clearly separated discussion topics.
 
 ## Question 3D: Visualize Clustering Results in 2D
 
@@ -1567,7 +1555,7 @@ mds_data_q3d <- data.frame(
 )
 ```
 
-### 3. Visualize the clustering results
+### 3. Visualize the clustering results by using MDS 2D
 
 ```{r}
 mds_plot_q3d <- ggplot(
@@ -1580,7 +1568,7 @@ mds_plot_q3d <- ggplot(
   )
 ) +
   geom_point(
-    size = 3.5, 
+    size = 3, 
     alpha = 0.7
   ) +
   coord_fixed(ratio = 1) + # Ensure a 1:1 ration between X-axis and Y-axis
@@ -2073,4 +2061,4 @@ write.csv(
 
 - In contrast, PageRank considers not only the number of connections but also the importance of the nodes providing those connections. Therefore, a node can receive a higher PageRank score even if it does not have the highest degree.
 
-- In this network, iGeek Gamer achieved the highest PageRank score (0.1025), despite having a lower out-degree that GameDropStation. This demonstrates that having more direct connections does not necessarily result in a higher PageRank score.
+- In this network, iGeek Gamer achieved the highest PageRank score (0.1024), despite having a lower out-degree that GameDropStation. This demonstrates that having more direct connections does not necessarily result in a higher PageRank score.
